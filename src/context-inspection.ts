@@ -29,7 +29,8 @@ export function captureContext(
     return clean;
   };
   const add=(group:ContextGroup,title:string,source:string,raw:string|object,count=estimate(raw))=>{
-    const clean=typeof raw==='string'?scrub(raw):JSON.stringify(sanitizeValue(raw,scrub),null,2);
+    const clean=typeof raw==='string'?scrub(raw):JSON.stringify(sanitizeValue(raw,scrub),(_key,value)=>
+      typeof value==='string'&&value.startsWith('data:image/')?`[图片正文，编码长度 ${value.length}，视觉 Token 为估算]`:value,2);
     const cap=Math.min(bytesLeft,262144);
     const omitted=Buffer.byteLength(clean)>cap;
     const content=omitted?cap>=96?trimOutput(clean,Math.floor(cap/3)):'':clean;

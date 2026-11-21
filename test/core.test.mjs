@@ -225,6 +225,24 @@ test('DeepSeek-shaped streamed deltas and 429 retry use the real SDK transport',
   assert.equal(mock.requests[0].body.thinking.type,'disabled');
 });
 
+test('image inputs survive compaction, persistence and independent review without base64 in context inspection',async t=>{
+  const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO9sAAAAASUVORK5CYII=';
+  const f=await rig(t,(body,n)=>n===1?{text:['已压缩旧历史']}:n===2?{text:['一张小图片']}
+    :verdict('completed','已核对图片',[],[],['视觉回答符合输入']),{persistence:'standard'});
+  f.profile.context=10000;
+  f.session.messages.push(...Array.from({length:15},()=>({role:'user',content:'Previous history '.repeat(200)})));
+  f.engine.start(f.session,f.project,f.profile,'fixture-credential',f.settings,{mode:'standard',text:'描述图片',attachments:'',
+    images:[{id:'picture',name:'pixel.png',image}]});
+  await f.until(()=>!f.engine.isActive(f.session.id));
+  assert.equal(f.session.status,'done');
+  assert.doesNotMatch(JSON.stringify(f.mock.requests[0].body),/iVBORw0KGgo/);
+  for(const request of f.mock.requests.slice(1))assert.ok(request.body.messages.some(message=>Array.isArray(message.content)&&
+    message.content.some(part=>part.type==='image_url'&&part.image_url.url===image)));
+  assert.equal(f.store.sessions()[0].entries.find(item=>item.kind==='user').images[0].image,image);
+  const trace=f.store.contextList(f.session.id).find(item=>item.kind==='answer');
+  assert.doesNotMatch(JSON.stringify(f.store.contextRead(f.session.id,trace.id)),/iVBORw0KGgo/);
+});
+
 test('agent writes code, requests approval, executes PowerShell, reads MCP and persists changes',async t=>{
   const f=await rig(t,(_,n)=>({
     1:{calls:[['write_file',{path:'program.js',text:'console.log(6*7)'}]]},

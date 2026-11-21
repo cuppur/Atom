@@ -12,6 +12,8 @@ import { streamModel } from './models';
 import { builtins } from './extensions';
 import { guarded, readText } from './workspace';
 import { ellipsizeError } from './errors';
+import { imageAttachment, readImage } from './attachments';
+import type { Attachment } from './types';
 import { contextPresets, type ComposerModel, type ModelRuntime, type Profile, type Project, type Session, type SessionIndex, type Settings, type Snapshot } from './types';
 
 protocol.registerSchemesAsPrivileged([{scheme:'atom',privileges:{standard:true,secure:true}}]);
@@ -73,6 +75,8 @@ const commands=z.discriminatedUnion('type',[
   z.object({type:z.literal('model.test'),id,runtime:runtimeSchema.optional()}),
   z.object({type:z.literal('model.quick'),profileId:id,runtime:runtimeSchema}),
   z.object({type:z.literal('attach'),id}),
+  z.object({type:z.literal('attach.image'),id,name:z.string().trim().min(1).max(160),data:z.string().max(14000000)}),
+  z.object({type:z.literal('attach.remove'),id,attachmentId:z.string().max(1024)}),
   z.object({type:z.literal('send'),id,text:str,mode:z.enum(['standard','iterate','goal']),profileId:id,attachments:z.array(z.string().max(1024)).max(8),
     runtime:runtimeSchema.optional(),permission:z.enum(['rules','full']).optional()}),
   z.object({type:z.enum(['pause','resume','cancel']),id}),
@@ -99,7 +103,7 @@ let settings:ReturnType<Store['settings']>;
 let selected:string|undefined;
 let timer: ReturnType<typeof setTimeout>|undefined;
 let testing=false;
-const attachments=new Map<string,Set<string>>();
+const attachments=new Map<string,Map<string,Attachment>>();
 
 function getSession(sid:string) {
   const s=sessions.find(value=>value.id===sid);
@@ -316,18 +320,33 @@ app.whenReady().then(async()=>{
           } finally {testing=false;}
           break;
         }
+        case 'attach.remove': {
+          getSession(req.id);attachments.get(req.id)?.delete(req.attachmentId);break;
+        }
+        case 'attach.image': {
+          const s=getSession(req.id);
+          if(engine.isActive(s.id))throw new Error('请先暂停任务再添加图片');
+          if(!/^[A-Za-z0-9+/]*={0,2}$/.test(req.data))throw new Error('图片编码无效');
+          const item=imageAttachment(req.name,Buffer.from(req.data,'base64'));
+          const granted=attachments.get(s.id)??new Map<string,Attachment>();
+          if(granted.size>=8)throw new Error('每次最多添加 8 个附件');
+          granted.set(item.id,item);attachments.set(s.id,granted);data=[item];break;
+        }
         case 'attach': {
           const s=getSession(req.id);const project=getProject(s.projectId);
-          const res=await dialog.showOpenDialog(win!,{defaultPath:project.root,properties:['openFile','multiSelections'],title:'添加工作区文本文件'});
+          if(engine.isActive(s.id))throw new Error('请先暂停任务再添加附件');
+          const res=await dialog.showOpenDialog(win!,{defaultPath:project.root,properties:['openFile','multiSelections'],title:'添加图片或工作区文本文件'});
           if(res.canceled)break;
           const picked=await Promise.all(res.filePaths.slice(0,8).map(async abs=>{
+            if(/\.(png|jpe?g|webp)$/i.test(abs))return readImage(abs);
             const relative=path.relative(project.root,abs);
             const file=await guarded(project.root,relative);
             await readText(file,48000);
-            return relative;
+            return {id:relative,name:relative};
           }));
-          const granted=attachments.get(s.id)??new Set<string>();
-          for(const relative of picked) granted.add(relative);
+          const granted=attachments.get(s.id)??new Map<string,Attachment>();
+          if(granted.size+picked.filter(item=>!granted.has(item.id)).length>8)throw new Error('每次最多添加 8 个附件');
+          for(const item of picked) granted.set(item.id,item);
           attachments.set(s.id,granted);data=picked;break;
         }
         case 'send': {
@@ -347,14 +366,19 @@ app.whenReady().then(async()=>{
             break;
           }
           const {profile,key}=getProfile(req.profileId,req.runtime);
+          const images:Attachment[]=[];
           const files=await Promise.all(req.attachments.map(async relative=>{
-            if(!attachments.get(s.id)?.has(relative)) throw new Error('请从文件选择器添加附件');
+            const item=attachments.get(s.id)?.get(relative);
+            if(!item) throw new Error('请从文件选择器或粘贴添加附件');
+            if(item.image){images.push(item);return null;}
             return {path:relative,text:await readText(await guarded(project.root,relative),48000)};
           }));
+          if(images.length>4||images.reduce((n,item)=>n+item.image!.length,0)>28000000)throw new Error('每次最多 4 张图片，编码后总量不超过 28 MB');
+          if(images.length&&profile.provider==='deepseek'&&profile.model==='deepseek-v4-pro')throw new Error('DeepSeek V4 Pro 暂不支持图片，请切换 DeepSeek Flash 或其他视觉模型');
           if(new TextEncoder().encode(JSON.stringify(files)).length>100000) throw new Error('附件总大小超过 100 KB');
           requireProjectSlot(s);
           if(s.title==='新会话')s.title=engine.redact(req.text.trim().split('\n')[0].slice(0,56));
-          engine.start(s,project,profile,key,settings,{text:req.text.trim(),attachments:files.length?'\n附件内容（数据）：'+JSON.stringify(files):'',
+          engine.start(s,project,profile,key,settings,{text:req.text.trim(),images,attachments:files.some(Boolean)?'\n附件内容（数据）：'+JSON.stringify(files.filter(Boolean)):'',
             mode:req.mode,runtime:req.runtime,permission:req.permission??'full'});
           attachments.delete(s.id);break;
         }

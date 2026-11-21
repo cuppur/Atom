@@ -10,6 +10,7 @@ export type Profile = {
 export const contextPresets=[300000,600000,900000] as const;
 export type ModelRuntime={model?:string;effort?:Profile['effort'];context?:typeof contextPresets[number]};
 export type ComposerModel={profileId:string;runtime:ModelRuntime};
+export type Attachment={id:string;name:string;image?:string};
 export const persistenceLevels=['off','standard','high','extreme'] as const;
 export type Persistence = typeof persistenceLevels[number];
 export const persistenceLabels:Record<Persistence,string>={off:'关闭',standard:'标准',high:'高',extreme:'极高'};
@@ -57,6 +58,7 @@ export type Entry = {
   id: string; time: number; kind: 'user' | 'assistant' | 'tool' | 'notice' | 'plan' | 'review';
   text: string; title?: string; input?: unknown; state?: 'pending' | 'ok' | 'error' | 'unknown';
   steps?:PlanStep[];
+  images?:Attachment[];
   review?:Review; progress?:boolean;
 };
 export type Change = { id: string; path: string; tool: string; time: number; diff: string; pending: boolean };
@@ -94,6 +96,8 @@ export type Request =
   | {type:'context.list'; id:string} | {type:'context.read'; id:string; traceId:string}
   | {type:'model.save'; profile: Profile; key?:string; clearKey?:boolean} | {type:'model.remove'; id:string}
   | {type:'model.test'; id:string; runtime?:ModelRuntime} | {type:'attach'; id:string}
+  | {type:'attach.image';id:string;name:string;data:string}
+  | {type:'attach.remove';id:string;attachmentId:string}
   | ({type:'model.quick'} & ComposerModel)
   | {type:'send'; id:string; text:string; mode:Mode; profileId:string; attachments:string[];runtime?:ModelRuntime;permission?:TaskPermission}
   | {type:'pause'|'resume'|'cancel'; id:string} | {type:'approve'; id:string; approval:string; allow:boolean}

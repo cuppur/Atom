@@ -7,7 +7,8 @@ import { type Project, type Profile, type Settings, type Session, type Approval,
 import { ellipsizeError, sanitizeValue } from './errors';
 import { redactor,trimOutput } from './redact';
 import { extensions } from './extensions';
-import { estimate,tailFor } from './context';
+import { estimate,tailFor,imageMetadata } from './context';
+import type { Attachment } from './types';
 import { streamModel, tally, reportedUsage, type StreamModel } from './models';
 import { TurnMeter } from './telemetry';
 import {captureContext,joinSystem,type SystemPart} from './context-inspection';
@@ -86,7 +87,7 @@ export class Engine {
     this.save(s);
   }
   start(s:Session,project:Project,profile:Profile,key:string,settings:Settings,
-    task?:{text:string; attachments:string; mode:Mode;runtime?:ModelRuntime;permission?:TaskPermission},resumeText?:string) {
+    task?:{text:string; attachments:string; images?:Attachment[];mode:Mode;runtime?:ModelRuntime;permission?:TaskPermission},resumeText?:string) {
     if(this.active.has(s.id)) throw new Error('任务还在停止，请稍后继续');
     if (!task && (!s.run || !['paused','interrupted','error'].includes(s.status))) throw new Error('当前会话没有待恢复任务');
     if(task) {
@@ -94,8 +95,14 @@ export class Engine {
       s.run={started:Date.now(),calls:0,activeMs:0,spent:0,stage:0,mode:task.mode,profileId:profile.id,permission:task.permission??'rules',
         runtime:task.runtime,limits:structuredClone(settings),goal:this.redact(task.text),last:'',repeats:0,tokens:0};
       appendUser(s,this.redact(task.text+task.attachments),task.attachments?'用户附件':undefined);
+      if(task.images?.length){
+        s.messages.pop();
+        s.messages.push({role:'user',content:[{type:'text',text:this.redact(task.text+task.attachments)},
+          ...task.images.map(item=>({type:'image' as const,image:item.image!,mediaType:'image/png'}))]});
+      }
       const initial=entry('user',this.redact(task.text+(task.attachments?'\n\n已附加工作区文件':'')));
       s.run.firstEntryId=initial.id;
+      if(task.images?.length)initial.images=task.images;
       if(task.attachments)s.run.revisions=[this.redact(task.attachments)];
       s.entries.push(initial);
     } else {
@@ -327,13 +334,17 @@ export class Engine {
         if(!level||level==='off')return 'pass';
         const evaluator=run.limits.evaluatorId?this.resolveEvaluator?.(run.limits.evaluatorId):{profile,key};
         if(!evaluator)throw new Error('验收模型配置不可用，可调整后继续任务。');
+        const images=taskEntries(s).flatMap(item=>item.images??[]);
+        const imageParts=images.map(item=>({type:'image' as const,image:item.image!,mediaType:'image/png'}));
+        const imageBudget=estimate(imageParts);
         const output=Math.min(evaluator.profile.output,level==='standard'?720:1400);
         const instruction=reviewerPrompt(level);
-        const brief=await reviewInput(s,project.root,evaluator.profile.context-output-estimate(instruction)-350,
+        const brief=await reviewInput(s,project.root,evaluator.profile.context-output-estimate(instruction)-imageBudget-350,
           redact(joinSystem(system.slice(1,4))),candidate,taskPlan(),redact,signal);
         const reviewParts=[{title:'独立验收指令',content:instruction}];
-        const input=estimate(brief)+estimate(instruction)+100;
-        const checked=await request({...evaluator,system:instruction,messages:[user(brief)],tools:new Map(),signal,
+        const input=estimate(brief)+estimate(instruction)+imageBudget+100;
+        const messages:ModelMessage[]=imageParts.length?[{role:'user',content:[{type:'text',text:brief},...imageParts]}]:[user(brief)];
+        const checked=await request({...evaluator,system:instruction,messages,tools:new Map(),signal,
           beforeRequest,output:affordable(input,output,evaluator.profile),onText:()=>{}},input,'review',reviewParts,{0:'验收证据'});
         signal.throwIfAborted();
         if(s.queued.length)return 'continue';
@@ -395,7 +406,7 @@ export class Engine {
           const {older,recent}=tailFor(s.messages,Math.floor(available*0.52));
           if(!older.length||estimate(recent)>available) throw new Error('最新消息超出上下文上限');
           const summaryBudget=Math.max(400,profile.context-estimate(run.goal)-700);
-          const historical=trimOutput(JSON.stringify(older),Math.min(42000,summaryBudget*2));
+          const historical=trimOutput(imageMetadata(older),Math.min(42000,summaryBudget*2));
           const prompt=[user(`任务目标：${run.goal}\n旧摘要：${s.summary}\n历史：${historical}`)];
           const estimatedInput=estimate(prompt)+200;
           const summaryParts=[{title:'上下文压缩指令',content:'压缩执行历史。保留任务目标、关键决策、已执行的工具和修改记录、验证结果、授权限制与未完成事项。保留已知失败以及结果未知的操作。只输出摘要。'}];
@@ -407,6 +418,14 @@ export class Engine {
           s.messageSources=Object.fromEntries(Object.entries(s.messageSources??{}).filter(([index])=>Number(index)>=shift)
             .map(([index,source])=>[Number(index)-shift,source]));
           s.messages=recent;
+          const images=taskEntries(s).flatMap(item=>item.images??[]);
+          const present=new Set(recent.flatMap(message=>message.role==='user'&&Array.isArray(message.content)?message.content.filter(part=>part.type==='image').map(part=>String(part.image)):[]));
+          const missing=images.filter(item=>!present.has(item.image!));
+          if(missing.length){
+            (s.messageSources??={})[s.messages.length]='当前任务图片';
+            s.messages.push({role:'user',content:[{type:'text',text:'当前任务原始图片，结合原目标和摘要继续。'},
+              ...missing.map(item=>({type:'image' as const,image:item.image!,mediaType:'image/png'}))]});
+          }
           if(!recent.length)appendUser(s,'依据已有摘要和任务目标继续。','压缩后继续');
           notice('已压缩历史上下文，完整记录仍保留在会话中。');
           safeSave();

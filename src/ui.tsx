@@ -11,6 +11,7 @@ import {ContextDialog} from './context-ui';
 import {ComposerControls} from './composer-model';
 import {compatibleRuntime,effectiveProfile} from './model-options';
 import './ui.css';
+import type { Attachment } from './types';
 
 const api=(window as unknown as {atom:Bridge & {tools:()=>Promise<{name:string;access:string;alwaysAsk?:boolean}[]>}}).atom;
 const providerNames={deepseek:'DeepSeek',openai:'OpenAI',anthropic:'Anthropic',gemini:'Gemini',compatible:'OpenAI-compatible'};
@@ -28,7 +29,7 @@ function App(){
   const [mode,setMode]=useState<Mode>('standard');
   const [permission,setPermission]=useState<TaskPermission>('full');
   const [text,setText]=useState('');
-  const [attached,setAttached]=useState<string[]>([]);
+  const [attached,setAttached]=useState<Attachment[]>([]);
   const [issue,setIssue]=useState('');
   const [page,setPage]=useState<'models'|'preferences'>();
   const [search,setSearch]=useState<'active'|'archived'>();
@@ -104,11 +105,11 @@ function App(){
   const activePermission=lockedMode?session?.run?.permission??'rules':permission;
   const canResume=session?.run&&['paused','interrupted','error'].includes(session.status);
   const submit=async()=>{
-    if(!session||!text.trim()||busy)return;
+    if(!session||(!text.trim()&&!attached.length)||busy)return;
     if(text.trim()==='/context'&&!attached.length){setContextOpen(true);setText('');return;}
     if(!profile){setPage('models');return;}
     setBusy(true);
-    const result=await send({type:'send',id:session.id,text,mode,profileId:profile.id,attachments:attached,runtime,permission});
+    const result=await send({type:'send',id:session.id,text:text.trim()||'请分析附加图片或文件。',mode,profileId:profile.id,attachments:attached.map(item=>item.id),runtime,permission});
     setBusy(false);
     if(result.ok){setText('');setAttached([]);setBottom(true);input.current?.focus();}
   };
@@ -153,6 +154,7 @@ function App(){
               return <article className={`message ${item.kind}`} key={item.id}>
                 <div className="message-label">{item.kind==='assistant'?<><img src="./atom.png" width={18} height={18} alt=""/>Atom{item.progress?' · 执行进度':''}</>:<>你</>}</div>
                 {item.kind==='assistant'?<Markdown remarkPlugins={[remarkGfm]} skipHtml>{item.text}</Markdown>:<div className="user-text">{item.text}</div>}
+                {item.images?.length&&<div className="message-images">{item.images.map(image=><img key={image.id} src={image.image} alt={image.name}/>)}</div>}
               </article>;
             })}
             {session?.live&&<article className="message assistant"><div className="message-label"><img src="./atom.png" width={18} height={18} alt=""/>Atom <span className="dot running"/></div><Markdown remarkPlugins={[remarkGfm]} skipHtml>{session.live}</Markdown></article>}
@@ -179,8 +181,27 @@ function App(){
             <IconButton label="结束待恢复任务" onClick={()=>void send({type:'cancel',id:session.id})}><Square size={14}/></IconButton>
           </div>}
           <form className="composer" onSubmit={event=>{event.preventDefault();void submit();}}>
-            {attached.length>0&&<div className="attachments">{attached.map(file=><button key={file} type="button" onClick={()=>setAttached(attached.filter(f=>f!==file))} title="移除附件"><FileCode2 size={13}/>{file}<X size={13}/></button>)}</div>}
+            {attached.length>0&&<div className="attachments">{attached.map(file=><button key={file.id} type="button" onClick={()=>{
+              setAttached(items=>items.filter(f=>f.id!==file.id));
+              void send({type:'attach.remove',id:session!.id,attachmentId:file.id});
+            }} title={`移除 ${file.name}`}>{file.image?<img src={file.image} alt={file.name}/>:<FileCode2 size={13}/>}<span>{file.name}</span><X size={13}/></button>)}</div>}
             <textarea ref={input} aria-label="任务指令" aria-describedby={question?'agent-question':undefined} value={text} onChange={event=>setText(event.target.value)}
+              onPaste={async event=>{
+                const files=Array.from(event.clipboardData.files).filter(file=>file.type.startsWith('image/'));
+                if(!files.length||!session||lockedMode)return;
+                event.preventDefault();
+                const id=session.id;
+                for(const file of files.slice(0,4)){
+                  if(file.size>10*1024*1024){setIssue('图片大小需在 10 MB 以内');continue;}
+                  const data=await new Promise<string>((resolve,reject)=>{
+                    const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);
+                    reader.onerror=()=>reject(new Error('图片读取失败'));reader.readAsDataURL(file);
+                  }).catch(()=>{setIssue('图片读取失败');return '';});
+                  if(!data)continue;
+                  const r=await send({type:'attach.image',id,name:file.name||'粘贴的图片.png',data});
+                  if(r.ok&&Array.isArray(r.data))setAttached(items=>[...items,...r.data as Attachment[]].slice(0,8));
+                }
+              }}
               onCompositionStart={()=>{isComposing.current=true;}} onCompositionEnd={()=>{isComposing.current=false;}}
               onKeyDown={event=>{
                 if(event.key!=='Enter'||event.shiftKey||event.nativeEvent.isComposing||event.nativeEvent.keyCode===229||isComposing.current)return;
@@ -192,7 +213,7 @@ function App(){
               <IconButton label="添加附件" disabled={!session||lockedMode} onClick={async()=>{
                 if(!session)return;
                 const r=await send({type:'attach',id:session.id});
-                if(r.ok&&Array.isArray(r.data))setAttached([...new Set([...attached,...r.data])].slice(0,8));
+                if(r.ok&&Array.isArray(r.data))setAttached(items=>[...new Map([...items,...r.data as Attachment[]].map(item=>[item.id,item])).values()].slice(0,8));
               }}><Plus size={18}/></IconButton>
               <label className="combo" title="执行模式"><ListTodo size={15}/><select aria-label="运行模式" value={lockedMode?session?.run?.mode??mode:mode} disabled={lockedMode} onChange={event=>setMode(event.target.value as Mode)}><option value="standard">普通执行</option><option value="iterate">持续迭代</option><option value="goal">目标模式</option></select></label>
               <label className={`combo task-permission ${activePermission==='full'?'full':''}`} title={activePermission==='full'
@@ -211,7 +232,7 @@ function App(){
                   return result.ok;
                 }} manage={()=>setPage('models')} details={()=>setContextOpen(true)}/>
               {running&&<><IconButton label="暂停任务" onClick={()=>void send({type:'pause',id:session!.id})}><Pause size={17}/></IconButton><IconButton label="取消任务" onClick={()=>void send({type:'cancel',id:session!.id})}><Square size={16}/></IconButton></>}
-              <button className="send" aria-label={question?'回答并继续':running?'追加指令':'发送任务'} title="发送 · Enter" disabled={!project||!text.trim()||busy}><ArrowUp size={19}/></button>
+              <button className="send" aria-label={question?'回答并继续':running?'追加指令':'发送任务'} title="发送 · Enter" disabled={!project||(!text.trim()&&!attached.length)||busy}><ArrowUp size={19}/></button>
             </div>
           </form>
           <div className="composer-note"><span><i className="dot"/>{project?.root??'未选择工作目录'}</span><span>Enter 发送 · Shift+Enter 换行</span></div>

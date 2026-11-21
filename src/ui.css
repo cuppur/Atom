@@ -99,7 +99,13 @@ h1,h2,h3,h4,p{margin-top:0}
 .composer textarea:focus-visible{outline:none}
 textarea::placeholder,input::placeholder{color:var(--subtle);opacity:1}
 .composer-actions{display:flex;align-items:center;gap:6px;padding:6px 9px 8px;min-width:0;flex-wrap:wrap}
-.composer-model{position:relative;display:flex;align-items:center;gap:4px;min-width:0}
+.composer-model{position:relative;display:flex;align-items:center;gap:4px;min-width:0;flex-wrap:wrap;justify-content:flex-end}
+.inline-choice{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;min-height:36px;padding:0 4px}
+.inline-choice select{color:var(--text);background:transparent;border:0;padding:4px 0;max-width:96px;cursor:pointer}
+.inline-choice select:disabled{cursor:default;opacity:.6}
+.inline-choice select option{background:var(--surface);color:var(--text)}
+.composer-actions .compose-spacer{display:none}
+.composer-actions .composer-model{margin-left:auto}
 .quick-model,.quick-context{display:flex;align-items:center;gap:6px;min-height:36px;border-radius:8px;color:var(--muted);padding:4px 8px}
 .quick-model{background:var(--bg);border:1px solid var(--line)}
 .quick-model span{max-width:145px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -167,6 +173,9 @@ option{background:var(--surface);color:var(--text)}
 .composer-note .dot{margin-right:6px}
 .attachments{display:flex;gap:5px;flex-wrap:wrap;padding:7px 10px 0}
 .attachments button{display:flex;align-items:center;gap:6px;background:var(--hover);border-radius:5px;padding:4px 6px}
+.attachments img{width:48px;height:48px;object-fit:contain;border-radius:4px}
+.message-images{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.message-images img{max-width:min(280px,100%);max-height:200px;object-fit:contain;border-radius:8px}
 .tabs{display:flex;gap:3px;padding:0 10px;border-bottom:1px solid var(--line)}
 .tabs button{flex:1;display:flex;justify-content:center;align-items:center;gap:6px;color:var(--muted);min-height:37px;border-bottom:2px solid transparent;font-size:13px;border-radius:6px 6px 0 0}
 .tabs button.active{border-color:var(--accent);color:var(--text)}

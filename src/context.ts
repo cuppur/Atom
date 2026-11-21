@@ -1,6 +1,19 @@
 import type { ModelMessage } from 'ai';
 
-export const estimate = (value:unknown) => Math.ceil(Buffer.byteLength(typeof value==='string'?value:JSON.stringify(value))/3);
+export function imageMetadata(value:unknown):string {
+  const serialize=(_key:string,item:unknown)=>typeof item==='string'&&item.startsWith('data:image/')
+    ? `[图片，编码长度 ${item.length}，视觉 Token 按供应商计量]`:item;
+  return JSON.stringify(value,serialize);
+}
+export const estimate = (value:unknown) => {
+  if(typeof value==='string')return Math.ceil(Buffer.byteLength(value)/3);
+  let images=0;
+  const serialized=JSON.stringify(value,(_key,item)=>{
+    if(typeof item==='string'&&item.startsWith('data:image/')){images++;return '[图片]';}
+    return item;
+  });
+  return Math.ceil(Buffer.byteLength(serialized)/3)+images*1536;
+};
 export function groups(messages:ModelMessage[]) {
   const result:ModelMessage[][]=[];
   for(const message of messages) {

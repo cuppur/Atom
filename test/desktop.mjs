@@ -78,12 +78,12 @@ try{
   await window.getByText(/串流成功 · 2 段/).waitFor();
   assert.equal(mock.requests[0].authorization,'Bearer '+key);
   await window.getByRole('button',{name:'关闭设置'}).click();
+  await window.getByRole('combobox',{name:'推理强度',exact:true}).selectOption('high');
+  await window.getByRole('combobox',{name:'执行毅力',exact:true}).selectOption('off');
   await window.getByRole('button',{name:'模型选项'}).click();
-  await window.locator('.quick-menu').getByRole('button',{name:/推理强度/}).click();
-  await window.locator('.quick-menu').getByRole('button',{name:'高',exact:true}).click();
-  await window.locator('.quick-menu').getByRole('button',{name:/执行毅力/}).click();
-  await window.getByRole('button',{name:'关闭',exact:true}).click();
-  await window.locator('.quick-menu').getByRole('button',{name:/上下文长度/}).click();
+  assert.equal(await window.locator('.quick-menu').getByRole('button',{name:/推理强度|执行毅力|上下文长度/}).count(),0);
+  await window.getByRole('button',{name:'关闭模型浮层'}).click();
+  await window.getByRole('button',{name:'上下文用量',exact:true}).click();
   await window.getByRole('button',{name:'900k',exact:true}).click();
   await window.getByRole('button',{name:'关闭模型浮层'}).click();
   assert.equal(await window.locator('.app-rail').count(),0);
@@ -95,6 +95,26 @@ try{
   const permission=window.getByRole('combobox',{name:'任务权限'});
   assert.equal(await permission.inputValue(),'full');
   await permission.selectOption('rules');
+  const picture=path.resolve('assets/atom.png');
+  await desktop.evaluate(({dialog},chosen)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[chosen]});},picture);
+  await window.getByRole('button',{name:'添加附件',exact:true}).click();
+  await window.locator('.attachments img').waitFor();
+  assert.equal(await window.getByRole('button',{name:'发送任务',exact:true}).isEnabled(),true);
+  const invalid=await window.evaluate(async()=>{
+    const snapshot=await window.atom.request({type:'snapshot'});
+    return window.atom.request({type:'attach.image',id:snapshot.data.session.id,name:'bad.png',data:'xyz'});
+  });
+  assert.equal(invalid.ok,false);
+  await window.getByTitle('移除 atom.png',{exact:true}).click();
+  const base64=await fs.readFile(picture,'base64');
+  await window.getByRole('textbox',{name:'任务指令'}).evaluate((element,data)=>{
+    const transfer=new DataTransfer();
+    const bytes=Uint8Array.from(atob(data),char=>char.charCodeAt(0));
+    transfer.items.add(new File([bytes],'pasted.png',{type:'image/png'}));
+    element.dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));
+  },base64);
+  await window.locator('.attachments img').waitFor();
+  if(evidence)await window.screenshot({path:path.join(evidence,'atom-image-input.png')});
   const composer=window.getByRole('textbox',{name:'任务指令'});
   await composer.fill('实现并运行返回 42 的程序');
   await composer.press('Shift+Enter');
@@ -104,6 +124,7 @@ try{
   await composer.dispatchEvent('compositionend');
   assert.equal(mock.requests.length,1);
   await composer.press('Enter');
+  await window.locator('.message-images img').waitFor();
   const plan=window.getByRole('region',{name:'任务计划'});
   await plan.locator('[data-step-status="in_progress"]').getByText('创建输出 42 的脚本').waitFor();
   await window.getByRole('button',{name:'允许一次'}).click();
@@ -121,6 +142,8 @@ try{
   assert.match(await window.locator('[data-atom-metric="cache"]').innerText(),/缓存命中率\s*16%/);
   assert.match(await window.locator('[data-atom-metric="context"]').innerText(),/125.*600,000.*%/s);
   assert.equal(mock.requests[1].body.reasoning_effort,'high');
+  const multimodal=mock.requests[1].body.messages.find(message=>message.role==='user');
+  assert.ok(multimodal.content.some(part=>part.type==='image_url'&&part.image_url.url.startsWith('data:image/png;base64,')));
   if(evidence)await window.screenshot({path:path.join(evidence,'atom-workspace.png')});
   await window.getByRole('button',{name:'上下文用量',exact:true}).click();
   await window.waitForFunction(()=>document.querySelector('.quick-legend li small')?.textContent?.includes('%'));
@@ -215,6 +238,7 @@ try{
   assert.ok(!JSON.stringify(state).includes(key));
   assert.equal(mock.requests.length,6);
   await window.getByRole('region',{name:'任务计划'}).getByText('2 / 2 已完成',{exact:true}).waitFor();
+  await window.locator('.message-images img').waitFor();
   assert.equal(state.data.session.title,'首轮编程验收');
   assert.ok(state.data.session.pinnedAt);
   assert.equal(state.data.session.lastTurn.cache,20);
@@ -249,12 +273,8 @@ try{
   assert.equal(goal.data.session.run.goal,'验证现有脚本');
   assert.equal(goal.data.session.run.goalOutcome.status,'achieved');
   await window.getByRole('combobox',{name:'运行模式'}).selectOption('standard');
-  await window.getByRole('button',{name:'模型选项'}).click();
-  await window.locator('.quick-menu').getByRole('button',{name:/执行毅力/}).click();
-  await window.getByRole('button',{name:'高',exact:true}).click();
-  await window.locator('.quick-menu').getByRole('button',{name:/推理强度/}).click();
-  await window.getByRole('button',{name:'低',exact:true}).click();
-  await window.getByRole('button',{name:'关闭模型浮层'}).click();
+  await window.getByRole('combobox',{name:'执行毅力',exact:true}).selectOption('high');
+  await window.getByRole('combobox',{name:'推理强度',exact:true}).selectOption('low');
   const adjusted=(await window.evaluate(()=>window.atom.request({type:'snapshot'}))).data;
   assert.equal(adjusted.settings.persistence,'high');
   assert.equal(adjusted.composer.runtime.effort,'low');

@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {ArrowLeft,Check,ChevronDown,ChevronRight,Cpu,Layers,ListChecks,SlidersHorizontal,X} from 'lucide-react';
+import {ArrowLeft,Check,ChevronDown,ChevronRight,Cpu,ListChecks,SlidersHorizontal,X} from 'lucide-react';
 import {contextPresets,persistenceLabels,persistenceLevels,type Bridge,type ComposerModel,type ContextHeader,type ContextTrace,type ModelRuntime,type Persistence,type Profile,type SessionView} from './types';
 import {compatibleRuntime,contextCapacity,effectiveProfile,formatContextPercent,isOfficialDeepSeek,modelVariants} from './model-options';
 
@@ -12,7 +12,7 @@ function effortLabel(profile:Profile,effort:Profile['effort']){
   const labels=isOfficialDeepSeek(profile)?['关闭','低','高','最高']:['供应商默认','低','中','高'];
   return labels[effortKeys.indexOf(effort)];
 }
-type Page='root'|'model'|'effort'|'persistence'|'context'|'usage';
+type Page='root'|'model'|'usage';
 const buckets=[
   {label:'系统提示词与记忆',color:'#a6b7f9'},
   {label:'工具定义',color:'#42c6aa'},
@@ -48,7 +48,7 @@ export function ComposerControls({profiles,profile,runtime,session,running,reque
     const keyboard=(event:KeyboardEvent)=>{
       if(event.key!=='Escape')return;
       event.preventDefault();event.stopPropagation();
-      if(page==='root'||page==='usage')close();else choosePage('root');
+      close();
     };
     document.addEventListener('pointerdown',outside);
     document.addEventListener('keydown',keyboard);
@@ -83,7 +83,7 @@ export function ComposerControls({profiles,profile,runtime,session,running,reque
     if(running||busy)return;
     setBusy(true);
     try {
-      if(await change({profileId:p.id,runtime:next}))setPage(now=>now===page?(now==='usage'?'usage':'root'):now);
+      if(await change({profileId:p.id,runtime:next}))setPage(now=>now===page&&now?(now==='usage'?'usage':'root'):now);
     }finally{setBusy(false);}
   };
   const test=async()=>{
@@ -101,7 +101,7 @@ export function ComposerControls({profiles,profile,runtime,session,running,reque
       title={value>contextCapacity(profile,active.model)?'超过该模型配置的窗口上限':undefined}
       onClick={()=>void choose(profile,{...runtime,context:value})}>{k(value)}</button>)}
   </div>;
-  const localState=page==='usage'||page==='context';
+  const localState=page==='usage';
   let occupied=0;
   return <div className="composer-model" ref={host}>
     <button type="button" className="quick-context" aria-label="上下文用量" title="上下文用量" aria-expanded={page==='usage'}
@@ -112,22 +112,37 @@ export function ComposerControls({profiles,profile,runtime,session,running,reque
           strokeDasharray={`${Math.min(1,usage)*50.27} 50.27`}/>}
       </svg>
     </button>
-    <button type="button" className="quick-model" aria-label="模型选项" aria-expanded={Boolean(page&&page!=='usage')}
+    <label className="inline-choice" title="推理强度">
+      <SlidersHorizontal size={15} aria-hidden="true"/>
+      <span>推理</span><select aria-label="推理强度" value={active?.effort??'off'} disabled={running||busy||!profile}
+        onChange={event=>profile&&void choose(profile,{...runtime,effort:event.target.value as Profile['effort']})}>
+        {effortKeys.map(effort=><option key={effort} value={effort}>{profile?effortLabel(profile,effort):effort}</option>)}
+      </select>
+    </label>
+    <label className="inline-choice" title="执行毅力">
+      <ListChecks size={15} aria-hidden="true"/>
+      <span>毅力</span><select aria-label="执行毅力" value={persistence} disabled={running||busy}
+        onChange={async event=>{
+          setBusy(true);
+          try{await changePersistence(event.target.value as Persistence);}finally{setBusy(false);}
+        }}>
+        {persistenceLevels.map(level=><option key={level} value={level}>{persistenceLabels[level]}</option>)}
+      </select>
+    </label>
+    <button type="button" className="quick-model" aria-label="模型选项" aria-expanded={page==='root'||page==='model'}
       onClick={event=>{opener.current=event.currentTarget;if(!active){manage();return;}choosePage(page&&page!=='usage'?undefined:'root');}}>
       <Cpu size={16}/><span>{profile&&active?modelLabel(profile,active.model):'添加模型'}</span><ChevronDown size={14}/>
     </button>
     {page&&<section ref={pane} className={`quick-popover ${localState?'context-popover':''}`} aria-label={page==='usage'?'上下文浮层':'任务模型设置'}>
       <header>
         {page!=='root'&&page!=='usage'&&<button className="icon-button" type="button" aria-label="返回模型选项" onClick={()=>choosePage('root')}><ArrowLeft size={16}/></button>}
-        <strong>{{root:'任务模型设置',model:'选择模型',effort:'推理强度',persistence:'执行毅力',context:'上下文长度',usage:'上下文用量'}[page]}</strong>
+        <strong>{{root:'模型设置',model:'选择模型',usage:'上下文用量'}[page]}</strong>
         <button className="icon-button" type="button" aria-label="关闭模型浮层" onClick={close}><X size={16}/></button>
       </header>
       {page==='root'&&active&&profile&&<>
         <div className="quick-menu">
           <button type="button" onClick={()=>choosePage('model')}><Cpu size={16}/><span>模型</span><small>{variantLabel(active.model)}</small><ChevronRight size={14}/></button>
-          <button type="button" onClick={()=>choosePage('effort')}><SlidersHorizontal size={16}/><span>推理强度</span><small>{effortLabel(profile,active.effort)}</small><ChevronRight size={14}/></button>
-          <button type="button" onClick={()=>choosePage('persistence')}><ListChecks size={16}/><span>执行毅力</span><small>{persistenceLabels[persistence]}</small><ChevronRight size={14}/></button>
-          <button type="button" onClick={()=>choosePage('context')}><Layers size={16}/><span>上下文长度</span><small>{k(active.context)}</small><ChevronRight size={14}/></button>
+
         </div>
         <div className="quick-actions">
           <button type="button" onClick={()=>{choosePage(undefined);manage();}}>管理 API</button>
@@ -135,11 +150,6 @@ export function ComposerControls({profiles,profile,runtime,session,running,reque
         </div>
         {message&&<p role="status" className="quick-message">{message}</p>}
       </>}
-      {page==='persistence'&&<div className="quick-menu">{persistenceLevels.map(level=><button type="button" key={level}
-        disabled={running||busy} aria-pressed={persistence===level} onClick={async()=>{
-          setBusy(true);
-          try{if(await changePersistence(level))choosePage('root');}finally{setBusy(false);}
-        }}><span>{persistenceLabels[level]}</span>{persistence===level&&<Check size={16}/>}</button>)}</div>}
       {page==='model'&&<div className="quick-menu">
         {profiles.flatMap(p=>modelVariants(p).map(model=><button type="button" key={p.id+model} disabled={running||busy}
           onClick={()=>void choose(p,compatibleRuntime(p,{...(p.id===profile?.id?runtime:{}),model}))}>
@@ -148,12 +158,6 @@ export function ComposerControls({profiles,profile,runtime,session,running,reque
         </button>))}
         <button type="button" onClick={()=>{choosePage(undefined);manage();}}>管理模型配置</button>
       </div>}
-      {page==='effort'&&profile&&active&&<div className="quick-menu">{effortKeys.map(effort=>
-        <button type="button" key={effort} disabled={running||busy} onClick={()=>void choose(profile,{...runtime,effort})}>
-          <span>{effortLabel(profile,effort)}</span>{active.effort===effort&&<Check size={16}/>}
-        </button>)}</div>}
-      {page==='context'&&active&&<div className="quick-context-body"><p className="context-tier-current">{k(active.context)} 上下文</p>{selectContext}
-        <small>供下次任务使用。可选档位取决于模型上限。</small></div>}
       {page==='usage'&&<div className="quick-context-body">
         <div className="context-readout"><strong>{limit?formatContextPercent(usage):'—'}</strong>
           <span>{limit?`${knownInput?'':'≈'}${k(input)} / ${k(limit)} Tokens`:'尚未选择模型'}</span></div>

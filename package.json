@@ -1,6 +1,6 @@
 {
   "name": "atom",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Local multi-provider desktop agent",
   "main": "build/main.mjs",
   "scripts": {
