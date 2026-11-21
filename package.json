@@ -1,0 +1,75 @@
+{
+  "name": "atom",
+  "version": "0.7.1",
+  "description": "Local multi-provider desktop agent",
+  "main": "build/main.mjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build": "node build.mjs",
+    "start": "npm run build && electron .",
+    "check": "tsc --noEmit",
+    "package:win": "npm run build && electron-builder --win nsis --x64",
+    "test:desktop": "npm run build && node test/desktop.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.106",
+    "@ai-sdk/google": "^4.0.122",
+    "@ai-sdk/openai": "^4.0.121",
+    "@ai-sdk/openai-compatible": "^3.0.93",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "ai": "^7.0.177",
+    "cheerio": "^1.2.0",
+    "diff": "^9.0.0",
+    "ipaddr.js": "^2.5.0",
+    "lucide-react": "^1.77.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.65.1",
+    "typescript": "^7.0.2"
+  },
+  "productName": "Atom",
+  "build": {
+    "appId": "local.atom.desktop",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "icon": "assets/atom.ico",
+      "signExecutable": false
+    },
+    "files": [
+      "build/index.html",
+      "build/main.mjs",
+      "build/preload.cjs",
+      "build/ui.js",
+      "build/ui.css",
+      "build/atom.png",
+      "package.json"
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "installerIcon": "assets/atom.ico",
+      "uninstallerIcon": "assets/atom.ico",
+      "shortcutName": "Atom"
+    }
+  }
+}
